@@ -68,7 +68,8 @@ as $$
     from public.profiles
     where id = (select auth.uid())
       and role = 'admin'
-  );
+  )
+  and coalesce((select auth.jwt() ->> 'aal') = 'aal2', false);
 $$;
 
 revoke all on function public.is_admin() from public;

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Navbar() {
-  const { user, profile, isAdmin, signOut } = useAuth();
+  const { user, profile, isAdmin, assuranceLevel, signOut } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [signOutError, setSignOutError] = useState("");
@@ -33,7 +33,7 @@ export default function Navbar() {
         ]
       : [];
 
-  const adminLinks = isAdmin
+  const adminLinks = isAdmin && assuranceLevel === "aal2"
     ? [
         { to: "/admin", label: "Dashboard" },
         { to: "/admin/events", label: "Manage Events" },

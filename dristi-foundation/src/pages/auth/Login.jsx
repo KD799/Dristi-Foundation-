@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabaseClient";
@@ -6,28 +6,107 @@ import { supabase } from "../../services/supabaseClient";
 export default function Login({ adminOnly = false }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAdmin, loading: authLoading } = useAuth();
+  const {
+    user,
+    isAdmin,
+    assuranceLevel,
+    loading: authLoading,
+    refreshAssuranceLevel,
+  } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mfaStarting, setMfaStarting] = useState(false);
+  const [mfaFlow, setMfaFlow] = useState(null);
+  const [verificationCode, setVerificationCode] = useState("");
+  const mfaStartedForUser = useRef(null);
+
+  const startAdminMfa = useCallback(async (userId) => {
+    if (mfaStartedForUser.current === userId) return;
+    mfaStartedForUser.current = userId;
+    setError("");
+    setMfaStarting(true);
+
+    try {
+      const { data: assurance, error: assuranceError } =
+        await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (assuranceError) throw assuranceError;
+      if (assurance.currentLevel === "aal2") {
+        navigate("/admin", { replace: true });
+        return;
+      }
+
+      const { data: factors, error: factorsError } =
+        await supabase.auth.mfa.listFactors();
+      if (factorsError) throw factorsError;
+
+      const verifiedTotp = factors.totp[0];
+      if (verifiedTotp) {
+        setMfaFlow({ type: "challenge", factorId: verifiedTotp.id });
+        return;
+      }
+
+      const unverifiedTotp = factors.all.filter(
+        (factor) => factor.factor_type === "totp" && factor.status === "unverified",
+      );
+      for (const factor of unverifiedTotp) {
+        const { error: unenrollError } = await supabase.auth.mfa.unenroll({
+          factorId: factor.id,
+        });
+        if (unenrollError) throw unenrollError;
+      }
+
+      const { data: enrollment, error: enrollmentError } =
+        await supabase.auth.mfa.enroll({
+          factorType: "totp",
+          friendlyName: "Dristi Foundation admin",
+        });
+      if (enrollmentError) throw enrollmentError;
+      setMfaFlow({
+        type: "enroll",
+        factorId: enrollment.id,
+        qrCode: enrollment.totp.qr_code,
+        secret: enrollment.totp.secret,
+      });
+    } finally {
+      setMfaStarting(false);
+    }
+  }, [navigate]);
 
   useEffect(() => {
     if (!user || authLoading) return;
-    if (adminOnly && !isAdmin) {
-      navigate("/events", { replace: true });
+    if (adminOnly) {
+      if (!isAdmin) {
+        navigate("/events", { replace: true });
+      } else if (assuranceLevel === "aal2") {
+        navigate("/admin", { replace: true });
+      } else {
+        void startAdminMfa(user.id).catch((mfaError) => {
+          setError(mfaError.message || "Unable to start administrator verification.");
+        });
+      }
       return;
     }
-    if (!adminOnly && isAdmin) {
-      navigate("/admin", { replace: true });
+    if (isAdmin) {
+      navigate(
+        assuranceLevel === "aal2" ? "/admin" : "/admin/login",
+        { replace: true },
+      );
       return;
     }
-    navigate(
-      adminOnly ? "/admin" : location.state?.from?.pathname || "/events",
-      { replace: true },
-    );
-  }, [user, isAdmin, authLoading, navigate, location.state, adminOnly]);
+    navigate(location.state?.from?.pathname || "/events", { replace: true });
+  }, [
+    user,
+    isAdmin,
+    assuranceLevel,
+    authLoading,
+    navigate,
+    location.state,
+    adminOnly,
+    startAdminMfa,
+  ]);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -66,10 +145,17 @@ export default function Login({ adminOnly = false }) {
             : "This is an administrator account. Use the administrator sign-in page.",
         );
       }
-      navigate(adminOnly ? "/admin" : location.state?.from?.pathname || "/events", {
-        replace: true,
-      });
+      if (adminOnly) {
+        await startAdminMfa(data.user.id);
+      } else {
+        navigate(location.state?.from?.pathname || "/events", {
+          replace: true,
+        });
+      }
     } catch (loginError) {
+      if (adminOnly && user?.id) {
+        mfaStartedForUser.current = user.id;
+      }
       let message = loginError.message || "Unable to sign in. Please try again.";
       if (message.includes("Invalid login credentials")) {
         message = "Email or password is incorrect. If you just registered, confirm your email before signing in.";
@@ -80,6 +166,45 @@ export default function Login({ adminOnly = false }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleMfaVerification = async (event) => {
+    event.preventDefault();
+    if (!mfaFlow) return;
+    setError("");
+    setLoading(true);
+
+    try {
+      const { data: challenge, error: challengeError } =
+        await supabase.auth.mfa.challenge({ factorId: mfaFlow.factorId });
+      if (challengeError) throw challengeError;
+
+      const { error: verifyError } = await supabase.auth.mfa.verify({
+        factorId: mfaFlow.factorId,
+        challengeId: challenge.id,
+        code: verificationCode.trim(),
+      });
+      if (verifyError) throw verifyError;
+
+      const verifiedLevel = await refreshAssuranceLevel();
+      if (verifiedLevel !== "aal2") {
+        throw new Error("Administrator verification did not complete. Please try again.");
+      }
+      navigate("/admin", { replace: true });
+    } catch (verificationError) {
+      setError(verificationError.message || "The verification code was not accepted.");
+    } finally {
+      setLoading(false);
+      setVerificationCode("");
+    }
+  };
+
+  const retryMfaSetup = () => {
+    if (!user) return;
+    mfaStartedForUser.current = null;
+    void startAdminMfa(user.id).catch((mfaError) => {
+      setError(mfaError.message || "Unable to start administrator verification.");
+    });
   };
 
   return (
@@ -112,7 +237,91 @@ export default function Login({ adminOnly = false }) {
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          {adminOnly && mfaStarting && (
+            <p className="mb-5 text-sm text-gray-600" role="status">
+              Preparing secure administrator verification…
+            </p>
+          )}
+
+          {adminOnly && error && !mfaFlow && user?.id && (
+            <button
+              type="button"
+              onClick={retryMfaSetup}
+              disabled={mfaStarting}
+              className="mb-5 w-full rounded-xl border border-indigo-200 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+            >
+              Try MFA setup again
+            </button>
+          )}
+
+          {adminOnly && mfaFlow ? (
+            <form onSubmit={handleMfaVerification} className="space-y-5">
+              {mfaFlow.type === "enroll" ? (
+                <div className="space-y-3 text-center">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Set up authenticator app
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    Scan this QR code with an authenticator app, then enter its
+                    current six-digit code to finish setup.
+                  </p>
+                  <img
+                    src={mfaFlow.qrCode}
+                    alt="Authenticator setup QR code"
+                    className="mx-auto h-48 w-48 rounded-lg border border-gray-200 p-2"
+                  />
+                  <details className="text-left text-xs text-gray-600">
+                    <summary className="cursor-pointer font-medium">
+                      Can’t scan the code?
+                    </summary>
+                    <p className="mt-2 break-all rounded bg-gray-50 p-3 font-mono">
+                      {mfaFlow.secret}
+                    </p>
+                  </details>
+                </div>
+              ) : (
+                <div className="space-y-2 text-center">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Verify it’s you
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    Enter the current six-digit code from your authenticator app.
+                  </p>
+                </div>
+              )}
+              <div>
+                <label
+                  htmlFor="mfa-code"
+                  className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-700"
+                >
+                  Authenticator code
+                </label>
+                <input
+                  id="mfa-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  required
+                  value={verificationCode}
+                  onChange={(event) =>
+                    setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-center text-lg tracking-[0.4em] focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="000000"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading || verificationCode.length !== 6}
+                className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 font-semibold text-white shadow-md shadow-indigo-200 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? "Verifying…" : "Verify and continue"}
+              </button>
+            </form>
+          ) : !mfaFlow && (!mfaStarting || !user) ? (
+            <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label
                 htmlFor="email"
@@ -167,7 +376,8 @@ export default function Login({ adminOnly = false }) {
             >
               {loading ? "Signing in..." : "Sign in →"}
             </button>
-          </form>
+            </form>
+          ) : null}
 
           {!adminOnly && (
             <div className="mt-8 pt-6 border-t border-gray-100 text-center">

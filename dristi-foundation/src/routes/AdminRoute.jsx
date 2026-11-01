@@ -3,7 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import Loader from "../components/Loader";
 
 export default function AdminRoute({ children }) {
-  const { user, isAdmin, loading } = useAuth();
+  const { user, isAdmin, assuranceLevel, loading } = useAuth();
   const location = useLocation();
 
   if (loading) return <Loader />;
@@ -12,6 +12,9 @@ export default function AdminRoute({ children }) {
   }
   if (!isAdmin) {
     return <Navigate to="/" replace />;
+  }
+  if (assuranceLevel !== "aal2") {
+    return <Navigate to="/admin/login" state={{ from: location }} replace />;
   }
   return children;
 }

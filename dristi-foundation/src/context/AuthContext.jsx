@@ -8,6 +8,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [role, setRole] = useState(null);
+  const [assuranceLevel, setAssuranceLevel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState("");
 
@@ -20,22 +21,31 @@ export function AuthProvider({ children }) {
       if (!currentUser) {
         setRole(null);
         setProfile(null);
+        setAssuranceLevel(null);
         setLoading(false);
         return;
       }
 
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("id, full_name, phone, address, role")
-          .eq("id", currentUser.id)
-          .maybeSingle();
+        const [profileResult, assuranceResult] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, full_name, phone, address, role")
+            .eq("id", currentUser.id)
+            .maybeSingle(),
+          supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+        ]);
 
         if (!active || request !== profileRequest) return;
 
-        if (error) {
+        if (assuranceResult.error) {
+          throw assuranceResult.error;
+        }
+        setAssuranceLevel(assuranceResult.data.currentLevel);
+
+        if (profileResult.error) {
           // If table doesn't exist yet or query fails, provide fallback so user isn't stuck
-          console.warn("Could not load profile from profiles table:", error.message);
+          console.warn("Could not load profile from profiles table:", profileResult.error.message);
           const fallback = {
             id: currentUser.id,
             full_name:
@@ -49,7 +59,7 @@ export function AuthProvider({ children }) {
           setProfile(fallback);
           setRole("user");
           setAuthError("");
-        } else if (!data) {
+        } else if (!profileResult.data) {
           // User exists in auth.users but has no row in profiles
           const newProfile = {
             id: currentUser.id,
@@ -63,23 +73,27 @@ export function AuthProvider({ children }) {
           };
 
           // Try to insert it
-          const { data: created } = await supabase
+          const { data: created, error: createError } = await supabase
             .from("profiles")
             .insert(newProfile)
             .select()
             .maybeSingle();
 
+          if (createError) {
+            console.warn("Could not create missing user profile:", createError.message);
+          }
           setProfile(created || newProfile);
           setRole(created?.role || "user");
           setAuthError("");
         } else {
-          setProfile(data);
-          setRole(data.role || "user");
+          setProfile(profileResult.data);
+          setRole(profileResult.data.role || "user");
           setAuthError("");
         }
       } catch (err) {
         console.error("Profile load exception:", err);
         setRole("user");
+        setAssuranceLevel(null);
         setProfile({
           id: currentUser.id,
           full_name: currentUser.email?.split("@")[0] || "User",
@@ -126,7 +140,15 @@ export function AuthProvider({ children }) {
     setUser(null);
     setProfile(null);
     setRole(null);
+    setAssuranceLevel(null);
     setAuthError("");
+  };
+
+  const refreshAssuranceLevel = async () => {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error) throw error;
+    setAssuranceLevel(data.currentLevel);
+    return data.currentLevel;
   };
 
   return (
@@ -136,6 +158,8 @@ export function AuthProvider({ children }) {
         profile,
         role,
         isAdmin: role === "admin",
+        assuranceLevel,
+        refreshAssuranceLevel,
         loading,
         authError,
         signOut,

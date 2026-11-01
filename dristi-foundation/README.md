@@ -64,9 +64,18 @@ administrators use the separate `/admin/login` form. The admin form accepts only
 accounts whose role in `public.profiles` is `admin`; the citizen form accepts
 only `user` accounts. The admin sign-in URL is not linked in public navigation,
 but keeping it private is not an authorization control: admin routes and
-Supabase row-level security policies enforce access based on the verified role.
-The schema grants authenticated users read-only access to profiles; only a
-trusted project owner can assign or change roles.
+Supabase row-level security policies enforce access based on the verified role
+and an MFA-authenticated (`aal2`) session. Admins must scan the enrollment QR
+code with an authenticator app and verify a six-digit code at first sign-in;
+subsequent admin sign-ins require a code from that app. The schema grants
+authenticated users read-only access to profiles; only a trusted project owner
+can assign or change roles.
+
+After applying the schema, use an admin account you control to enroll its
+authenticator factor at `/admin/login` before using the admin portal. Store the
+authenticator recovery method securely; losing the authenticator may require a
+project owner to reset the account's factor through a trusted administrative
+process. Do not share the QR code or setup secret.
 
 New accounts receive the `user` role automatically. To grant administrator
 access, first sign up with the intended account, then run this statement in the
