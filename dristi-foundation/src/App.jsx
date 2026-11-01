@@ -22,6 +22,7 @@ import EyeCampForm from "./pages/user/EyeCampForm";
 import BookApplyForm from "./pages/user/BookApplyForm";
 import UpdateApplicationForm from "./pages/user/UpdateApplicationForm";
 import MyApplications from "./pages/user/MyApplications";
+import AccountSecurity from "./pages/user/AccountSecurity";
 
 // Admin pages
 import Dashboard from "./pages/admin/Dashboard";
@@ -139,6 +140,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <MyApplications />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/account/security"
+              element={
+                <ProtectedRoute>
+                  <AccountSecurity />
                 </ProtectedRoute>
               }
             />

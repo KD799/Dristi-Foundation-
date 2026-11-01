@@ -8,10 +8,12 @@ export default function Login({ adminOnly = false }) {
   const location = useLocation();
   const {
     user,
-    isAdmin,
+    role,
+    adminMfaEnabled,
     assuranceLevel,
     loading: authLoading,
     refreshAssuranceLevel,
+    signOut,
   } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,6 +24,7 @@ export default function Login({ adminOnly = false }) {
   const [mfaFlow, setMfaFlow] = useState(null);
   const [verificationCode, setVerificationCode] = useState("");
   const mfaStartedForUser = useRef(null);
+  const needsOwnerApproval = role === "admin" && !adminMfaEnabled;
 
   const startAdminMfa = useCallback(async (userId) => {
     if (mfaStartedForUser.current === userId) return;
@@ -48,28 +51,10 @@ export default function Login({ adminOnly = false }) {
         return;
       }
 
-      const unverifiedTotp = factors.all.filter(
-        (factor) => factor.factor_type === "totp" && factor.status === "unverified",
+      setMfaFlow({ type: "missing" });
+      setError(
+        "No verified authenticator is enrolled for this administrator account. Admin sign-in cannot enroll the first factor.",
       );
-      for (const factor of unverifiedTotp) {
-        const { error: unenrollError } = await supabase.auth.mfa.unenroll({
-          factorId: factor.id,
-        });
-        if (unenrollError) throw unenrollError;
-      }
-
-      const { data: enrollment, error: enrollmentError } =
-        await supabase.auth.mfa.enroll({
-          factorType: "totp",
-          friendlyName: "Dristi Foundation admin",
-        });
-      if (enrollmentError) throw enrollmentError;
-      setMfaFlow({
-        type: "enroll",
-        factorId: enrollment.id,
-        qrCode: enrollment.totp.qr_code,
-        secret: enrollment.totp.secret,
-      });
     } finally {
       setMfaStarting(false);
     }
@@ -78,8 +63,10 @@ export default function Login({ adminOnly = false }) {
   useEffect(() => {
     if (!user || authLoading) return;
     if (adminOnly) {
-      if (!isAdmin) {
+      if (role !== "admin") {
         navigate("/events", { replace: true });
+      } else if (!adminMfaEnabled) {
+        return;
       } else if (assuranceLevel === "aal2") {
         navigate("/admin", { replace: true });
       } else {
@@ -89,9 +76,9 @@ export default function Login({ adminOnly = false }) {
       }
       return;
     }
-    if (isAdmin) {
+    if (role === "admin") {
       navigate(
-        assuranceLevel === "aal2" ? "/admin" : "/admin/login",
+        adminMfaEnabled && assuranceLevel === "aal2" ? "/admin" : "/admin/login",
         { replace: true },
       );
       return;
@@ -99,7 +86,8 @@ export default function Login({ adminOnly = false }) {
     navigate(location.state?.from?.pathname || "/events", { replace: true });
   }, [
     user,
-    isAdmin,
+    role,
+    adminMfaEnabled,
     assuranceLevel,
     authLoading,
     navigate,
@@ -123,7 +111,7 @@ export default function Login({ adminOnly = false }) {
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, admin_mfa_enabled")
         .eq("id", data.user.id)
         .maybeSingle();
 
@@ -133,11 +121,19 @@ export default function Login({ adminOnly = false }) {
       }
 
       const expectedRole = adminOnly ? "admin" : "user";
-      if (profile?.role !== expectedRole) {
+      if (
+        profile?.role !== expectedRole ||
+        (adminOnly && profile.admin_mfa_enabled !== true)
+      ) {
         const { error: signOutError } = await supabase.auth.signOut();
         if (signOutError) throw signOutError;
         if (!profile) {
           throw new Error("Could not verify account permissions. Please contact the administrator.");
+        }
+        if (adminOnly && profile.role === "admin") {
+          throw new Error(
+            "Administrator access is not enabled for this account. The project owner must verify your authenticator setup and approve admin MFA access.",
+          );
         }
         throw new Error(
           adminOnly
@@ -199,7 +195,7 @@ export default function Login({ adminOnly = false }) {
     }
   };
 
-  const retryMfaSetup = () => {
+  const retryMfaChallenge = () => {
     if (!user) return;
     mfaStartedForUser.current = null;
     void startAdminMfa(user.id).catch((mfaError) => {
@@ -228,6 +224,15 @@ export default function Login({ adminOnly = false }) {
         </div>
 
         <div className="p-8">
+          {needsOwnerApproval && (
+            <div
+              role="alert"
+              className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+            >
+              Administrator access is not enabled. The project owner must
+              verify your authenticator setup and approve admin MFA access.
+            </div>
+          )}
           {error && (
             <div
               role="alert"
@@ -246,49 +251,48 @@ export default function Login({ adminOnly = false }) {
           {adminOnly && error && !mfaFlow && user?.id && (
             <button
               type="button"
-              onClick={retryMfaSetup}
+              onClick={retryMfaChallenge}
               disabled={mfaStarting}
               className="mb-5 w-full rounded-xl border border-indigo-200 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
             >
-              Try MFA setup again
+              Retry authenticator check
             </button>
           )}
 
-          {adminOnly && mfaFlow ? (
+          {adminOnly && (needsOwnerApproval || mfaFlow?.type === "missing") ? (
+            <div className="space-y-4">
+              <p className="text-sm leading-relaxed text-gray-700">
+                Ask the Supabase project owner to temporarily change this
+                account to the citizen role. Sign in at the citizen portal and
+                open <code>/account/security</code> to enroll and verify your
+                authenticator. After the owner confirms setup with you through
+                a trusted channel, they can restore the admin role.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await signOut();
+                    navigate("/login", { replace: true });
+                  } catch (signOutError) {
+                    setError(signOutError.message || "Unable to sign out.");
+                  }
+                }}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : adminOnly && mfaFlow?.type === "challenge" ? (
             <form onSubmit={handleMfaVerification} className="space-y-5">
-              {mfaFlow.type === "enroll" ? (
-                <div className="space-y-3 text-center">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Set up authenticator app
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Scan this QR code with an authenticator app, then enter its
-                    current six-digit code to finish setup.
-                  </p>
-                  <img
-                    src={mfaFlow.qrCode}
-                    alt="Authenticator setup QR code"
-                    className="mx-auto h-48 w-48 rounded-lg border border-gray-200 p-2"
-                  />
-                  <details className="text-left text-xs text-gray-600">
-                    <summary className="cursor-pointer font-medium">
-                      Can’t scan the code?
-                    </summary>
-                    <p className="mt-2 break-all rounded bg-gray-50 p-3 font-mono">
-                      {mfaFlow.secret}
-                    </p>
-                  </details>
-                </div>
-              ) : (
-                <div className="space-y-2 text-center">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Verify it’s you
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Enter the current six-digit code from your authenticator app.
-                  </p>
-                </div>
-              )}
+              <div className="space-y-2 text-center">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Verify it’s you
+                </h2>
+                <p className="text-sm text-gray-600">
+                  Enter the current six-digit code from your authenticator app.
+                </p>
+              </div>
               <div>
                 <label
                   htmlFor="mfa-code"
@@ -320,7 +324,7 @@ export default function Login({ adminOnly = false }) {
                 {loading ? "Verifying…" : "Verify and continue"}
               </button>
             </form>
-          ) : !mfaFlow && (!mfaStarting || !user) ? (
+          ) : !needsOwnerApproval && !mfaFlow && (!mfaStarting || !user) ? (
             <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label

@@ -8,6 +8,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [role, setRole] = useState(null);
+  const [adminMfaEnabled, setAdminMfaEnabled] = useState(false);
   const [assuranceLevel, setAssuranceLevel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState("");
@@ -20,6 +21,7 @@ export function AuthProvider({ children }) {
       const request = ++profileRequest;
       if (!currentUser) {
         setRole(null);
+        setAdminMfaEnabled(false);
         setProfile(null);
         setAssuranceLevel(null);
         setLoading(false);
@@ -30,7 +32,7 @@ export function AuthProvider({ children }) {
         const [profileResult, assuranceResult] = await Promise.all([
           supabase
             .from("profiles")
-            .select("id, full_name, phone, address, role")
+            .select("id, full_name, phone, address, role, admin_mfa_enabled")
             .eq("id", currentUser.id)
             .maybeSingle(),
           supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
@@ -58,6 +60,7 @@ export function AuthProvider({ children }) {
           };
           setProfile(fallback);
           setRole("user");
+          setAdminMfaEnabled(false);
           setAuthError("");
         } else if (!profileResult.data) {
           // User exists in auth.users but has no row in profiles
@@ -84,15 +87,18 @@ export function AuthProvider({ children }) {
           }
           setProfile(created || newProfile);
           setRole(created?.role || "user");
+          setAdminMfaEnabled(created?.admin_mfa_enabled === true);
           setAuthError("");
         } else {
           setProfile(profileResult.data);
           setRole(profileResult.data.role || "user");
+          setAdminMfaEnabled(profileResult.data.admin_mfa_enabled === true);
           setAuthError("");
         }
       } catch (err) {
         console.error("Profile load exception:", err);
         setRole("user");
+        setAdminMfaEnabled(false);
         setAssuranceLevel(null);
         setProfile({
           id: currentUser.id,
@@ -140,6 +146,7 @@ export function AuthProvider({ children }) {
     setUser(null);
     setProfile(null);
     setRole(null);
+    setAdminMfaEnabled(false);
     setAssuranceLevel(null);
     setAuthError("");
   };
@@ -158,6 +165,7 @@ export function AuthProvider({ children }) {
         profile,
         role,
         isAdmin: role === "admin",
+        adminMfaEnabled,
         assuranceLevel,
         refreshAssuranceLevel,
         loading,

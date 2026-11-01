@@ -3,8 +3,12 @@ create table if not exists public.profiles (
   full_name text,
   phone text,
   address text,
-  role text not null default 'user' check (role in ('user', 'admin'))
+  role text not null default 'user' check (role in ('user', 'admin')),
+  admin_mfa_enabled boolean not null default false
 );
+
+alter table public.profiles
+  add column if not exists admin_mfa_enabled boolean not null default false;
 
 create table if not exists public.posts (
   id uuid primary key default gen_random_uuid(),
@@ -68,6 +72,7 @@ as $$
     from public.profiles
     where id = (select auth.uid())
       and role = 'admin'
+      and admin_mfa_enabled = true
   )
   and coalesce((select auth.jwt() ->> 'aal') = 'aal2', false);
 $$;
