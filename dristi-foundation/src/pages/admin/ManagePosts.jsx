@@ -548,10 +548,13 @@ export default function ManagePosts() {
                 <input
                   id="image"
                   type="file"
-                  accept="image/*"
-                  onChange={(e) => setImageFile(e.target.files[0])}
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => setImageFile(e.target.files?.[0] || null)}
                   className="w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
                 />
+                <p className="mt-1 text-[11px] text-gray-500">
+                  JPEG, PNG, or WebP. Maximum file size: 5 MB.
+                </p>
                 {formData.image_url && !imageFile && (
                   <div className="mt-2 flex items-center gap-3">
                     <img
