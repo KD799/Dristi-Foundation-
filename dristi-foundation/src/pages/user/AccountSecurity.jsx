@@ -16,20 +16,14 @@ export default function AccountSecurity() {
     setLoading(true);
 
     try {
-      if (isAdmin) {
-        throw new Error(
-          "Administrator accounts cannot enroll a first authenticator from this page. Ask the project owner to temporarily set the account role to citizen before setup.",
-        );
-      }
-
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("role")
         .maybeSingle();
       if (profileError) throw profileError;
-      if (profile?.role !== "user") {
+      if (profile?.role !== "user" && profile?.role !== "admin") {
         throw new Error(
-          "Authenticator setup for administrator onboarding is available only while the profile has the citizen role. Ask the project owner for help.",
+          "Authenticator setup is available only for citizen and administrator accounts.",
         );
       }
 
@@ -117,22 +111,32 @@ export default function AccountSecurity() {
           </div>
         )}
 
-        {isAdmin ? (
-          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
-            Admin accounts cannot enroll their first authenticator here after
-            promotion. Ask the Supabase project owner to temporarily set this
-            account to the citizen role, then return here after signing in again.
-          </div>
-        ) : enabled ? (
+        {enabled ? (
           <div className="mt-6 space-y-4">
             <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
               A verified authenticator is already enabled for this account.
             </p>
-            <p className="text-sm leading-relaxed text-gray-600">
-              If this account is being prepared for administrator access, ask
-              the project owner to verify your identity and authenticator setup
-              through a trusted channel before assigning the admin role.
-            </p>
+            {isAdmin && (
+              <>
+                <p className="text-sm leading-relaxed text-gray-600">
+                  Your administrator role is unchanged. Admin access still
+                  requires a verified MFA session and project-owner approval.
+                </p>
+                <Link
+                  to="/admin/login"
+                  className="inline-flex font-medium text-indigo-600 hover:text-indigo-800"
+                >
+                  Continue to administrator sign in
+                </Link>
+              </>
+            )}
+            {!isAdmin && (
+              <p className="text-sm leading-relaxed text-gray-600">
+                If this account is being prepared for administrator access, ask
+                the project owner to verify your identity and authenticator setup
+                through a trusted channel before assigning the admin role.
+              </p>
+            )}
           </div>
         ) : factor ? (
           <form onSubmit={verifySetup} className="mt-6 space-y-5">
@@ -191,10 +195,9 @@ export default function AccountSecurity() {
         ) : (
           <div className="mt-6 space-y-4">
             <p className="text-sm leading-relaxed text-gray-600">
-              For administrator onboarding, complete this setup while the
-              account still has the citizen role. The project owner should
-              confirm your identity and successful setup directly before
-              granting admin access.
+              {isAdmin
+                ? "You can enroll here without changing your administrator role. Admin tools remain protected until you verify this authenticator and the project owner approves access."
+                : "For administrator onboarding, complete this setup before the project owner grants admin access. The owner should confirm your identity and successful setup through a trusted channel."}
             </p>
             <button
               type="button"

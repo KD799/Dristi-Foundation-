@@ -53,7 +53,7 @@ export default function Login({ adminOnly = false }) {
 
       setMfaFlow({ type: "missing" });
       setError(
-        "No verified authenticator is enrolled for this administrator account. Admin sign-in cannot enroll the first factor.",
+        "No verified authenticator is enrolled for this administrator account. Set one up in Account Security to continue.",
       );
     } finally {
       setMfaStarting(false);
@@ -128,7 +128,9 @@ export default function Login({ adminOnly = false }) {
         const { error: signOutError } = await supabase.auth.signOut();
         if (signOutError) throw signOutError;
         if (!profile) {
-          throw new Error("Could not verify account permissions. Please contact the administrator.");
+          throw new Error(
+            "No profile record is visible for this account. The project owner should run supabase/schema.sql in Supabase, then try again.",
+          );
         }
         if (adminOnly && profile.role === "admin") {
           throw new Error(
@@ -259,15 +261,41 @@ export default function Login({ adminOnly = false }) {
             </button>
           )}
 
-          {adminOnly && (needsOwnerApproval || mfaFlow?.type === "missing") ? (
+          {adminOnly && needsOwnerApproval ? (
             <div className="space-y-4">
               <p className="text-sm leading-relaxed text-gray-700">
-                Ask the Supabase project owner to temporarily change this
-                account to the citizen role. Sign in at the citizen portal and
-                open <code>/account/security</code> to enroll and verify your
-                authenticator. After the owner confirms setup with you through
-                a trusted channel, they can restore the admin role.
+                The project owner must verify your identity and authenticator
+                setup through a trusted channel, then enable administrator MFA
+                approval for this account.
               </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await signOut();
+                    navigate("/login", { replace: true });
+                  } catch (signOutError) {
+                    setError(signOutError.message || "Unable to sign out.");
+                  }
+                }}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : adminOnly && mfaFlow?.type === "missing" ? (
+            <div className="space-y-4">
+              <p className="text-sm leading-relaxed text-gray-700">
+                This administrator account has no verified authenticator yet.
+                You are signed in, but administrator tools remain locked until
+                you enroll and verify a factor.
+              </p>
+              <Link
+                to="/account/security"
+                className="block w-full rounded-xl bg-indigo-600 px-4 py-3 text-center font-semibold text-white hover:bg-indigo-700"
+              >
+                Set up authenticator
+              </Link>
               <button
                 type="button"
                 onClick={async () => {

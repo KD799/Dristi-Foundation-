@@ -45,16 +45,15 @@ npm run lint
 
 ## Supabase setup
 
-Create a Supabase project, then run `supabase/schema.sql` in its SQL Editor. The
-script creates the application tables, user-profile trigger, row-level security
-policies, and the public `post-images` storage bucket. It can be run again
-without duplicating policies.
+Create a Supabase project, then run the complete `supabase/schema.sql` file in
+its SQL Editor. This single, rerunnable script creates and updates the
+application tables, admin MFA approval check, user-profile trigger, missing
+profiles, row-level security policies, and public `post-images` storage bucket.
+It preserves existing profile roles and does not approve any admin account for
+MFA automatically.
 
-If the base schema has already been applied, run
-`supabase/migrations/20261101_admin_mfa_approval.sql` in the SQL Editor. This
-adds the owner-controlled admin MFA approval flag and updates the database
-admin check. Existing admin accounts will need a trusted project owner to
-review and explicitly enable that flag after verifying the authenticator.
+For an existing project, rerun the same `supabase/schema.sql` file to apply
+schema updates and repairs; there are no separate SQL migration files to run.
 
 ### Email verification
 
@@ -73,18 +72,19 @@ but keeping it private is not an authorization control: admin routes and
 Supabase row-level security policies enforce access based on the verified role
 and an MFA-authenticated (`aal2`) session. A separate owner-controlled
 `admin_mfa_enabled` profile flag must also be enabled; clients cannot change
-roles or this flag. Admin sign-in never offers first-factor enrollment.
-Subsequent admin sign-ins require a code from the authenticator app.
+roles or this flag. First-factor enrollment is handled in Account Security,
+not on the admin sign-in form. Subsequent admin sign-ins require a code from
+the authenticator app.
 
-First-factor enrollment is not allowed from the admin sign-in flow. For new
-administrator onboarding, the intended person should sign up and confirm email,
-then enroll and verify an authenticator at `/account/security` while still a
-citizen. A trusted project owner must verify the person's identity and
+First-factor enrollment is not offered directly on the admin sign-in form. For
+new administrator onboarding, the intended person should sign up and confirm
+email, then enroll and verify an authenticator at `/account/security` while
+still a citizen. A trusted project owner must verify the person's identity and
 successful setup through an out-of-band channel before enabling admin access.
-For an existing admin without a verified factor, the project owner must
-temporarily set the account to `user` and set `admin_mfa_enabled` to `false`,
-have the person enroll and verify at `/account/security`, then verify identity
-out of band before restoring `admin` and setting `admin_mfa_enabled` to `true`.
+An existing admin without a verified factor can sign in with their password and
+use the link to `/account/security` without changing roles. Admin tools remain
+blocked until the authenticator is verified and the project owner enables the
+`admin_mfa_enabled` flag after confirming identity through a trusted channel.
 This owner-controlled approval is required because a password-only session can
 start first-factor enrollment through Supabase Auth directly. The database
 approval flag blocks all admin operations until that factor and the person's
