@@ -116,8 +116,13 @@ export default function Login({ adminOnly = false }) {
         .maybeSingle();
 
       if (profileError) {
-        await supabase.auth.signOut();
-        throw new Error(`Could not verify account permissions: ${profileError.message}`);
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) {
+          throw new Error(
+            "Unable to verify account permissions or end this session. Close this browser session and contact the site administrator.",
+          );
+        }
+        throw new Error("Unable to verify account permissions. Please try again later.");
       }
 
       const expectedRole = adminOnly ? "admin" : "user";

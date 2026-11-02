@@ -50,7 +50,10 @@ its SQL Editor. This single, rerunnable script creates and updates the
 application tables, admin MFA approval check, user-profile trigger, missing
 profiles, row-level security policies, and public `post-images` storage bucket.
 It preserves existing profile roles and does not approve any admin account for
-MFA automatically.
+MFA automatically. Citizen registration policies only allow pending
+applications for open programs. The public image bucket is restricted to JPEG,
+PNG, and WebP files up to 5 MB; admin uploads also check image signatures in the
+browser before sending them.
 
 For an existing project, rerun the same `supabase/schema.sql` file to apply
 schema updates and repairs; there are no separate SQL migration files to run.
@@ -63,6 +66,9 @@ details and are not used for authentication. In the Supabase dashboard:
 1. Keep **Confirm email** enabled under Authentication provider settings.
 2. Leave the Phone provider disabled; no SMS provider is needed.
 3. Configure the email templates and redirect URLs for the deployed app.
+4. Set the minimum password length to 12 characters and retain Supabase Auth's
+   login and email-send rate limits. The signup form also enforces the
+   12-character minimum for normal browser submissions.
 
 Users must confirm their email before signing in. Citizens sign in at `/login`;
 administrators use the separate `/admin/login` form. The admin form accepts only
@@ -120,10 +126,19 @@ the person and their authenticator have been verified through a trusted channel.
 Import this repository into Vercel and set the Vite Supabase environment
 variables from `.env.example` in the project's Environment Variables settings.
 Do not add a Supabase service-role key to Vercel's `VITE_` variables or to
-frontend code. `vercel.json` provides the SPA fallback so direct links such as
-`/admin/login` resolve correctly after deployment. Set the deployed URL as the
-Supabase Site URL and add your production domain and email-confirmation return
-URLs to Supabase's allowed redirect URLs.
+frontend code. `vercel.json` configures the SPA fallback and baseline HTTPS,
+content-security, framing, MIME-sniffing, referrer, and browser-feature
+response headers. The content security policy permits Supabase project hosts
+(`*.supabase.co`) and HTTPS-hosted post images; update it if you intentionally
+add another trusted API or asset host. Set the deployed URL as the Supabase
+Site URL and add your production domain and email-confirmation return URLs to
+Supabase's allowed redirect URLs.
+
+Run `npm audit` periodically to check installed dependencies for known
+vulnerabilities. The application uses Supabase's client-side session model;
+server-only Express, MongoDB, cookie-session, CORS, and CSRF middleware from
+generic security guides do not apply to this architecture. Supabase row-level
+security remains the authorization boundary for database and storage access.
 
 Replace the placeholder organization contact details and registration number
 in `src/config/orgInfo.js` before launch.

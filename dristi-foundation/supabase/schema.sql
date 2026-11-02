@@ -162,9 +162,11 @@ create policy "Users can register for open events"
   to authenticated
   with check (
     (select auth.uid()) = user_id
+    and status = 'pending'
     and (
       (
         event_id is not null
+        and post_id is null
         and exists (
           select 1
           from public.events
@@ -197,6 +199,11 @@ insert into storage.buckets (id, name, public)
 values ('post-images', 'post-images', true)
 on conflict (id) do update set public = excluded.public;
 
+update storage.buckets
+set file_size_limit = 5242880,
+    allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
+where id = 'post-images';
+
 drop policy if exists "Anyone can view post images" on storage.objects;
 create policy "Anyone can view post images"
   on storage.objects for select
@@ -207,14 +214,29 @@ drop policy if exists "Admins can upload post images" on storage.objects;
 create policy "Admins can upload post images"
   on storage.objects for insert
   to authenticated
-  with check (bucket_id = 'post-images' and (select public.is_admin()));
+  with check (
+    bucket_id = 'post-images'
+    and (select public.is_admin())
+    and storage.extension(name) in ('jpg', 'jpeg', 'png', 'webp')
+    and metadata ->> 'mimetype' in ('image/jpeg', 'image/png', 'image/webp')
+  );
 
 drop policy if exists "Admins can update post images" on storage.objects;
 create policy "Admins can update post images"
   on storage.objects for update
   to authenticated
-  using (bucket_id = 'post-images' and (select public.is_admin()))
-  with check (bucket_id = 'post-images' and (select public.is_admin()));
+  using (
+    bucket_id = 'post-images'
+    and (select public.is_admin())
+    and storage.extension(name) in ('jpg', 'jpeg', 'png', 'webp')
+    and metadata ->> 'mimetype' in ('image/jpeg', 'image/png', 'image/webp')
+  )
+  with check (
+    bucket_id = 'post-images'
+    and (select public.is_admin())
+    and storage.extension(name) in ('jpg', 'jpeg', 'png', 'webp')
+    and metadata ->> 'mimetype' in ('image/jpeg', 'image/png', 'image/webp')
+  );
 
 drop policy if exists "Admins can delete post images" on storage.objects;
 create policy "Admins can delete post images"

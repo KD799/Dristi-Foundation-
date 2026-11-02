@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import { useAuth } from "./context/AuthContext";
@@ -11,6 +11,7 @@ import Home from "./pages/public/Home";
 import About from "./pages/public/About";
 import OurWork from "./pages/public/OurWork";
 import Updates from "./pages/public/Updates";
+import AtelierNorth from "./pages/public/AtelierNorth";
 
 // Auth pages
 import Login from "./pages/auth/Login";
@@ -73,12 +74,18 @@ class ErrorBoundary extends React.Component {
 
 function App() {
   const { authError } = useAuth();
+  const { pathname } = useLocation();
+  const isAtelierNorth = pathname === "/atelier-north";
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col min-h-screen bg-gray-50">
-        <Navbar />
-        {authError && (
+      <div
+        className={`flex min-h-screen flex-col ${
+          isAtelierNorth ? "atelier-app" : "bg-gray-50"
+        }`}
+      >
+        {!isAtelierNorth && <Navbar />}
+        {!isAtelierNorth && authError && (
           <p role="alert" className="bg-red-50 px-4 py-3 text-center text-red-700 text-xs">
             {authError}
           </p>
@@ -87,6 +94,7 @@ function App() {
           <Routes>
             {/* Public */}
             <Route path="/" element={<Home />} />
+            <Route path="/atelier-north" element={<AtelierNorth />} />
             <Route path="/about" element={<About />} />
             <Route path="/our-work" element={<OurWork />} />
             <Route path="/updates" element={<Updates />} />
@@ -187,7 +195,7 @@ function App() {
             />
           </Routes>
         </main>
-        <Footer />
+        {!isAtelierNorth && <Footer />}
       </div>
     </ErrorBoundary>
   );
